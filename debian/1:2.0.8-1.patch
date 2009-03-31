@@ -1,0 +1,193 @@
+Index: src/evdev.h
+===================================================================
+--- src/evdev.h	(revision 2)
++++ src/evdev.h	(revision 3)
+@@ -49,6 +49,7 @@
+     int screen;
+     int min_x, min_y, max_x, max_y;
+     int abs_x, abs_y, old_x, old_y;
++    int min_pressure, max_pressure, abs_pressure;
+     int flags;
+     int tool;
+ 
+Index: src/evdev.c
+===================================================================
+--- src/evdev.c	(revision 2)
++++ src/evdev.c	(revision 3)
+@@ -218,6 +218,8 @@
+     int dx, dy;
+     unsigned int abs;
+     EvdevPtr pEvdev = pInfo->private;
++    Bool got_left = FALSE;
++    int val_left = 0;
+ 
+     dx = 0;
+     dy = 0;
+@@ -282,6 +284,10 @@
+ 		pEvdev->abs_y = value;
+ 		abs = 1;
+ 		break;
++	    case ABS_PRESSURE:
++		pEvdev->abs_pressure = value;
++		abs = 1;
++		break;
+ 	    }
+ 	    break;
+ 
+@@ -294,8 +300,14 @@
+             switch (ev.code) {
+ 	    /* swap here, pretend we're an X-conformant device. */
+             case BTN_LEFT:
+-                if (!EvdevMBEmuFilterEvent(pInfo, ev.code, value))
+-                    xf86PostButtonEvent(pInfo->dev, 0, 1, value, 0, 0);
++                if (!EvdevMBEmuFilterEvent(pInfo, ev.code, value)) {
++                    /*
++                     * Postpone left button registration until coordinates
++                     * are known - this avoids GIMP peculiarities.
++                     */
++                    got_left = TRUE;
++                    val_left = value;
++                }
+                 break;
+             case BTN_RIGHT:
+                 if (!EvdevMBEmuFilterEvent(pInfo, ev.code, value))
+@@ -315,7 +327,6 @@
+                                     value, 0, 0);
+                 break;
+ 
+-	    case BTN_TOUCH:
+  	    case BTN_TOOL_PEN:
+  	    case BTN_TOOL_RUBBER:
+  	    case BTN_TOOL_BRUSH:
+@@ -367,17 +378,30 @@
+         xf86PostMotionEvent(pInfo->dev, FALSE, 0, 2, dx, dy);
+ 
+     /*
++     * Send postponed left button pressure (if any) along with coordinates
++     * to make GIMP sence tablet pen correctly.
++     */
++    if (got_left) {
++        if (abs)
++            xf86PostButtonEvent(pInfo->dev, 1, 1, val_left, 0, 3,
++                                pEvdev->abs_x, pEvdev->abs_y,
++                                pEvdev->abs_pressure);
++        else
++            xf86PostButtonEvent(pInfo->dev, 0, 1, val_left, 0, 0);
++    }
++    /*
+      * Some devices only generate valid abs coords when BTN_DIGI is
+      * pressed.  On wacom tablets, this means that the pen is in
+      * proximity of the tablet.  After the pen is removed, BTN_DIGI is
+      * released, and a (0, 0) absolute event is generated.  Checking
+-     * pEvdev->digi here, lets us ignore that event.  pEvdev is
++     * pEvdev->tool here, lets us ignore that event. pEvdev->tool is
+      * initialized to 1 so devices that doesn't use this scheme still
+      * just works.
+      */
+     if (abs && pEvdev->tool) {
+-	xf86PostMotionEvent(pInfo->dev, TRUE, 0, 2,
+-			    pEvdev->abs_x, pEvdev->abs_y);
++	xf86PostMotionEvent(pInfo->dev, TRUE, 0, 3,
++			    pEvdev->abs_x, pEvdev->abs_y,
++			    pEvdev->abs_pressure);
+     }
+ }
+ 
+@@ -767,7 +791,7 @@
+ {
+     InputInfoPtr pInfo;
+     EvdevPtr pEvdev;
+-    struct input_absinfo absinfo_x, absinfo_y;
++    struct input_absinfo absinfo_x, absinfo_y, absinfo_pressure;
+ 
+     pInfo = device->public.devicePrivate;
+     pEvdev = pInfo->private;
+@@ -784,12 +808,20 @@
+ 	return !Success;
+     }
+ 
++    if (ioctl(pInfo->fd,
++	      EVIOCGABS(ABS_PRESSURE), &absinfo_pressure) < 0) {
++	xf86Msg(X_ERROR, "ioctl EVIOCGABS failed: %s\n", strerror(errno));
++	return !Success;
++    }
++
+     pEvdev->min_x = absinfo_x.minimum;
+     pEvdev->max_x = absinfo_x.maximum;
+     pEvdev->min_y = absinfo_y.minimum;
+     pEvdev->max_y = absinfo_y.maximum;
++    pEvdev->min_pressure = absinfo_pressure.minimum;
++    pEvdev->max_pressure = absinfo_pressure.maximum;
+ 
+-    if (!InitValuatorClassDeviceStruct(device, 2,
++    if (!InitValuatorClassDeviceStruct(device, 3,
+ #if GET_ABI_MAJOR(ABI_XINPUT_VERSION) < 3
+                                        GetMotionHistory,
+ #endif
+@@ -805,6 +837,13 @@
+     xf86InitValuatorAxisStruct(device, 1, pEvdev->min_y, pEvdev->max_y,
+ 			       10000, 0, 10000);
+     xf86InitValuatorDefaults(device, 1);
++
++    /* Z valuator */
++    xf86InitValuatorAxisStruct(device, 2,
++			       pEvdev->min_pressure, pEvdev->max_pressure,
++			       10000, 0, 10000);
++    xf86InitValuatorDefaults(device, 1);
++
+     xf86MotionHistoryAllocate(pInfo);
+ 
+     if (!InitPtrFeedbackClassDeviceStruct(device, EvdevPtrCtrlProc))
+@@ -1139,7 +1178,7 @@
+     long key_bitmask[NBITS(KEY_MAX)];
+     long rel_bitmask[NBITS(REL_MAX)];
+     long abs_bitmask[NBITS(ABS_MAX)];
+-    int i, has_axes, has_buttons, has_keys;
++    int i, has_axes, has_pressure, has_buttons, has_keys;
+     EvdevPtr pEvdev = pInfo->private;
+ 
+     if (ioctl(pInfo->fd, EVIOCGRAB, (void *)1)) {
+@@ -1173,6 +1212,7 @@
+     }
+ 
+     has_axes = FALSE;
++    has_pressure = FALSE;
+     has_buttons = FALSE;
+     has_keys = FALSE;
+ 
+@@ -1185,12 +1225,15 @@
+     if (TestBit(ABS_X, abs_bitmask) && TestBit(ABS_Y, abs_bitmask)) {
+         xf86Msg(X_INFO, "%s: Found x and y absolute axes\n", pInfo->name);
+ 	pEvdev->flags |= EVDEV_ABSOLUTE_EVENTS;
+-	if (TestBit(BTN_TOUCH, key_bitmask)) {
++	has_axes = TRUE;
++	if (TestBit(ABS_PRESSURE, abs_bitmask)) {
++	    xf86Msg(X_INFO, "%s: Found absolute pressure axes\n", pInfo->name);
++	    has_pressure = TRUE;
++	} else if (TestBit(BTN_TOUCH, key_bitmask)) {
+ 	    xf86Msg(X_INFO, "%s: Found absolute touchpad\n", pInfo->name);
+ 	    pEvdev->flags |= EVDEV_TOUCHPAD;
+ 	    pEvdev->old_x = pEvdev->old_y = -1;
+ 	}
+-	has_axes = TRUE;
+     }
+ 
+     if (TestBit(BTN_LEFT, key_bitmask)) {
+@@ -1210,10 +1253,15 @@
+     }
+ 
+     if (has_axes && has_buttons) {
+-        xf86Msg(X_INFO, "%s: Configuring as mouse\n", pInfo->name);
+ 	pInfo->flags |= XI86_POINTER_CAPABLE | XI86_SEND_DRAG_EVENTS | 
+ 	    XI86_CONFIGURED;
+-	pInfo->type_name = XI_MOUSE;
++	if (has_pressure) {
++	    xf86Msg(X_INFO, "%s: Configuring as tablet\n", pInfo->name);
++	    pInfo->type_name = XI_TABLET;
++	} else {
++	    xf86Msg(X_INFO, "%s: Configuring as mouse\n", pInfo->name);
++	    pInfo->type_name = XI_MOUSE;
++	}
+     }
+ 
+     if (has_keys) {
