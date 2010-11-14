@@ -1,0 +1,150 @@
+From cda651c9ac407674f373a9a79c5d1282beac0cef Mon Sep 17 00:00:00 2001
+From: Nikolai Kondrashov <spbnick@gmail.com>
+Date: Sat, 23 Oct 2010 16:40:20 +0400
+Subject: [PATCH 3/3] Clean up button code to number mapping
+
+Now BTN_MOUSE, BTN_MISC and BTN_DIGI button ranges are all mapped to the
+same lower numbers including first three, corresponding to the LMR mouse
+buttons. Like this:
+
+        1       BTN_LEFT        BTN_0       BTN_TOUCH
+        2       BTN_MIDDLE      BTN_1       BTN_STYLUS
+        3       BTN_RIGHT       BTN_2       BTN_STYLUS2
+
+        8       BTN_SIDE        BTN_3
+        9       BTN_EXTRA       BTN_4
+        10      BTN_FORWARD     BTN_5
+        11      BTN_BACK        BTN_6
+        12      BTN_TASK        BTN_7
+        13      0x118           BTN_8
+        14      0x119           BTN_9
+        15      0x11A           0x10A
+        16      0x11B           0x10B
+        17      0x11C           0x10C
+        18      0x11D           0x10D
+        19      0x11E           0x10E
+        20      0x11F           0x10F
+
+This streamlines the button mapping under the assumption that these ranges
+don't generally appear in a single device simultaneously. If they do appear,
+they will simply report overlapping button numbers.
+
+Signed-off-by: Nikolai Kondrashov <spbnick@gmail.com>
+---
+ src/evdev.c |   99 +++++++++++++++-------------------------------------------
+ 1 files changed, 26 insertions(+), 73 deletions(-)
+
+diff --git a/src/evdev.c b/src/evdev.c
+index f4836f7..390a30e 100644
+--- a/src/evdev.c
++++ b/src/evdev.c
+@@ -2190,80 +2190,33 @@ _X_EXPORT XF86ModuleData evdevModuleData =
+ unsigned int
+ EvdevUtilButtonEventToButtonNumber(EvdevPtr pEvdev, int code)
+ {
+-    unsigned int button = 0;
+-
+-    switch(code) {
+-    case BTN_LEFT:
+-	button = 1;
+-	break;
+-
+-    case BTN_RIGHT:
+-	button = 3;
+-	break;
+-
+-    case BTN_MIDDLE:
+-	button = 2;
+-	break;
+-
+-        /* Treat BTN_[0-2] as LMR buttons on devices that do not advertise
+-           BTN_LEFT, BTN_MIDDLE, BTN_RIGHT.
+-           Otherwise, treat BTN_[0+n] as button 5+n.
+-           XXX: This causes duplicate mappings for BTN_0 + n and BTN_SIDE + n
+-         */
+-    case BTN_0:
+-        button = (TestBit(BTN_LEFT, pEvdev->key_bitmask)) ?  8 : 1;
+-        break;
+-    case BTN_1:
+-        button = (TestBit(BTN_MIDDLE, pEvdev->key_bitmask)) ?  9 : 2;
+-        break;
+-    case BTN_2:
+-        button = (TestBit(BTN_RIGHT, pEvdev->key_bitmask)) ?  10 : 3;
+-        break;
+-
+-        /* FIXME: BTN_3.. and BTN_SIDE.. have the same button mapping */
+-    case BTN_3:
+-    case BTN_4:
+-    case BTN_5:
+-    case BTN_6:
+-    case BTN_7:
+-    case BTN_8:
+-    case BTN_9:
+-	button = (code - BTN_0 + 5);
+-        break;
+-
+-    case BTN_SIDE:
+-    case BTN_EXTRA:
+-    case BTN_FORWARD:
+-    case BTN_BACK:
+-    case BTN_TASK:
+-	button = (code - BTN_LEFT + 5);
+-	break;
+-
+-    case BTN_TOUCH:
+-        button = 1;
+-        break;
+-    case BTN_STYLUS:
+-        button = 2;
+-        break;
+-    case BTN_STYLUS2:
+-        button = 3;
+-        break;
+-
+-    default:
+-	if ((code > BTN_TASK) && (code < KEY_OK)) {
+-	    if (code < BTN_JOYSTICK) {
+-                if (code < BTN_MOUSE)
+-                    button = (code - BTN_0 + 5);
+-                else
+-                    button = (code - BTN_LEFT + 5);
+-            }
+-	}
++    switch (code)
++    {
++        /* Mouse buttons */
++        case BTN_LEFT:
++            return 1;
++        case BTN_MIDDLE:
++            return 2;
++        case BTN_RIGHT:
++            return 3;
++        case BTN_SIDE ... BTN_JOYSTICK - 1:
++            return 8 + code - BTN_SIDE;
++
++        /* Generic buttons */
++        case BTN_0 ... BTN_2:
++            return 1 + code - BTN_0;
++        case BTN_3 ... BTN_MOUSE - 1:
++            return 8 + code - BTN_3;
++
++        /* Tablet stylus buttons */
++        case BTN_TOUCH ... BTN_STYLUS2:
++            return 1 + code - BTN_TOUCH;
++
++        /* The rest */
++        default:
++            /* Ignore */
++            return 0;
+     }
+-
+-    if (button > EVDEV_MAXBUTTONS)
+-	return 0;
+-
+-    return button;
+ }
+ 
+ #ifdef HAVE_PROPERTIES
+-- 
+1.7.2.3
+

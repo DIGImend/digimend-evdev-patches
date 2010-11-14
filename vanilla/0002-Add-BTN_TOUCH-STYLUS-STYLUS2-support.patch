@@ -1,0 +1,39 @@
+From e4b38ea0c11b009e5eb4c3a69528f1bc36809bef Mon Sep 17 00:00:00 2001
+From: Nikolai Kondrashov <spbnick@gmail.com>
+Date: Tue, 7 Sep 2010 10:38:20 +1000
+Subject: [PATCH 2/3] Add BTN_TOUCH/STYLUS/STYLUS2 support.
+
+These three buttons are mapped into buttons 1/2/3, respectively.
+Overlapping range with BTN_LEFT/MIDDLE/RIGHT, assuming that these
+ranges don't generally appear in a single device simultaneously.
+
+Signed-off-by: Nikolai Kondrashov <spbnick@gmail.com>
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ src/evdev.c |   10 ++++++++++
+ 1 files changed, 10 insertions(+), 0 deletions(-)
+
+diff --git a/src/evdev.c b/src/evdev.c
+index a68634b..f4836f7 100644
+--- a/src/evdev.c
++++ b/src/evdev.c
+@@ -2239,6 +2239,16 @@ EvdevUtilButtonEventToButtonNumber(EvdevPtr pEvdev, int code)
+ 	button = (code - BTN_LEFT + 5);
+ 	break;
+ 
++    case BTN_TOUCH:
++        button = 1;
++        break;
++    case BTN_STYLUS:
++        button = 2;
++        break;
++    case BTN_STYLUS2:
++        button = 3;
++        break;
++
+     default:
+ 	if ((code > BTN_TASK) && (code < KEY_OK)) {
+ 	    if (code < BTN_JOYSTICK) {
+-- 
+1.7.2.3
+
