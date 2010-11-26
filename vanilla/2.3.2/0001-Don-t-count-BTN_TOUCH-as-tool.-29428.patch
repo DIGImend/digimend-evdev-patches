@@ -1,0 +1,31 @@
+From faef58dd01364d309ea0f008b3f607591c1fe406 Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Mon, 9 Aug 2010 13:01:11 +1000
+Subject: [PATCH 1/4] Don't count BTN_TOUCH as tool. (#29428)
+
+Devices that don't have a tool but BTN_TOUCH simply have the tool always on.
+Devices that have a tool other than BTN_TOUCH set this tool before BTN_TOUCH
+is emitted anyway.
+
+X.Org Bug 29428 <http://bugs.freedesktop.org/show_bug.cgi?id=29428>
+
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ src/evdev.c |    1 -
+ 1 files changed, 0 insertions(+), 1 deletions(-)
+
+diff --git a/src/evdev.c b/src/evdev.c
+index faab8f3..cd833dd 100644
+--- a/src/evdev.c
++++ b/src/evdev.c
+@@ -629,7 +629,6 @@ EvdevProcessKeyEvent(InputInfoPtr pInfo, struct input_event *ev)
+             break;
+ 
+         case BTN_TOUCH:
+-            pEvdev->tool = value ? ev->code : 0;
+             if (!(pEvdev->flags & (EVDEV_TOUCHSCREEN | EVDEV_TABLET)))
+                 break;
+             /* Treat BTN_TOUCH from devices that only have BTN_TOUCH as
+-- 
+1.7.2.3
+
